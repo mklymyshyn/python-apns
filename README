@@ -1,0 +1,15 @@
+Dependencies either:
+   -- openssl command line tool
+   or
+   -- ssl, http://pypi.python.org/pypi/ssl/
+   
+
+If you found any issues please send it to Google Code APNSWrapper Issues page at:
+	http://code.google.com/p/apns-python-wrapper/issues/list
+	
+The APNSWrapper website is at Google Code:
+
+   http://code.google.com/p/apns-python-wrapper/
+
+
+You can get support via mail by max at sonettic.com or klymyshyn at gmail.com
