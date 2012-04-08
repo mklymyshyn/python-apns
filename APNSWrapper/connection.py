@@ -9,17 +9,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import base64
+import logging
 import os
 import socket
 import subprocess
+
+
+try:
+    import json
+except ImportError:
+    import simplejson as json
 
 from apnsexceptions import *
 from utils import *
 
 
 __all__ = ('APNSConnectionContext', 'OpenSSLCommandLine', \
-           'APNSConnection', 'SSLModuleConnection')
+           'APNSConnection', 'APNSServiceConnection', 'SSLModuleConnection')
 
 
 class APNSConnectionContext(object):
@@ -44,6 +51,81 @@ class APNSConnectionContext(object):
     def close(self):
         raise APNSNotImplementedMethod("APNSConnectionContext.close method "\
                                         "not implemented")
+
+
+class APNSServiceConnection(object):
+    """
+    Class which handle connection between local application
+    and remote APNSService which provide possibility to
+    send a lot of messages simultaneously and with one connection
+    to real APNS
+    """
+    WAITING, CONNECTED = (1, 2)
+    NEWLINE = "\r\n"
+
+    def __init__(self, host='127.0.0.1', port=1025, bufsize=1024):
+        self.status = self.WAITING
+        self.host = host
+        self.port = port
+        self.bufsize = bufsize
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        if not hasattr(self.__class__, '_connection'):
+            self.__class__._connection = 0
+
+    def close(self):
+        """
+        Close socket connection
+        """
+        if self.sock:
+            self.sock.close()
+
+    @property
+    def socket(self):
+        """
+        Method to initialize connection to the service and
+        return initialized socket
+        """
+        if self.status == self.WAITING:
+            self.sock.connect((self.host, self.port))
+            self.status = self.CONNECTED
+
+        return self.sock
+
+    def write(self, data=None):
+        """
+        Send message to the internal APNS Service server, read
+        response and parse it to JSON
+        """
+
+        request = {
+        'message': base64.standard_b64encode(data),
+        'id': '#%d' % self.__class__._connection,
+        }
+
+        self.__class__._connection += 1
+        self.socket.send("%s%s" % (json.dumps(request), self.NEWLINE))
+        response = []
+
+
+class DummyConnection(APNSConnectionContext):
+    """
+    This class only for debugging purposes
+    """
+    def __init__(self, certificate=None):
+        self.certificate = certificate
+
+    def connect(self, host, port):
+        logging.debug("Creating connection to the %s:%s" % (host, str(port)))
+
+    def write(self, data=None):
+        logging.debug("  > Writing data to stream: %s" % data)
+
+    def read(self):
+        logging.debug("    < Reading data from the stream")
+
+    def close(self):
+        logging.debug("    - Closing connection to the APNS service")
 
 
 class OpenSSLCommandLine(APNSConnectionContext):

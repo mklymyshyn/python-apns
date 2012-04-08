@@ -14,15 +14,15 @@ import struct
 import base64
 import binascii
 
-from __init__ import *
-from connection import *
-from apnsexceptions import *
-from utils import _doublequote
+from APNSWrapper import *
+from APNSWrapper.connection import *
+from APNSWrapper.apnsexceptions import *
+from APNSWrapper.utils import _doublequote
 
 NULL = 'null'
 
 
-__all__ = ('APNSAlert', 'APNSProperty', 'APNSNotificationWrapper', \
+_all__ = ('APNSAlert', 'APNSProperty', 'APNSNotificationWrapper', \
            'APNSNotification')
 
 
@@ -41,22 +41,22 @@ class APNSAlert(object):
         """
         The text of the alert message.
         """
-        if alertBody and not isinstance(alertBody, str):
+        if alertBody and not isinstance(alertBody, (str, unicode)):
             raise APNSValueError("Unexpected value of argument. "\
                                     "It should be string or None.")
 
-        self.alertBody = alertBody
+        self.alertBody = alertBody.encode("utf-8")
         return self
 
     def action_loc_key(self, alk=NULL):
         """
         If a string is specified, displays an alert with two buttons.
         """
-        if alk and not isinstance(alk, str):
+        if alk and not isinstance(alk, (str, unicode)):
             raise APNSValueError("Unexpected value of argument. "\
                                     "It should be string or None.")
 
-        self.actionLocKey = alk
+        self.actionLocKey = alk.encode("utf-8")
         return self
 
     def loc_key(self, lk):
@@ -65,10 +65,10 @@ class APNSAlert(object):
         Localizable.strings file for the current
         localization (which is set by the user's language preference).
         """
-        if lk and not isinstance(lk, str):
+        if lk and not isinstance(lk, (str, unicode)):
             raise APNSValueError("Unexcpected value of argument. "\
                                         "It should be string or None")
-        self.locKey = lk
+        self.locKey = lk.encode("utf-8")
         return self
 
     def loc_args(self, la):
@@ -81,7 +81,7 @@ class APNSAlert(object):
             raise APNSValueError("Unexpected type of argument. "\
                                     "It should be list or tuple of strings")
 
-        self.locArgs = ['"%s"' % str(x) for x in la]
+        self.locArgs = ['"%s"' % unicode(x).encode("utf-8") for x in la]
         return self
 
     def build(self):
@@ -114,15 +114,15 @@ class APNSProperty(object):
     data = None
 
     def __init__(self, name=None, data=None):
-        if not name or not isinstance(name, str) or len(name) == 0:
+        if not name or not isinstance(name, (str, unicode)) or len(name) == 0:
             raise APNSValueError("Name of property argument "\
                                     "should be a non-empry string")
 
-        if not isinstance(data, (int, str, list, tuple, float)):
+        if not isinstance(data, (int, str, unicode, list, tuple, float)):
             raise APNSValueError("Data argument should be string, "\
                                                 "number, list of tuple")
 
-        self.name = name
+        self.name = unicode(name).encode("utf-8")
         self.data = data
 
     def build(self):
@@ -131,14 +131,18 @@ class APNSProperty(object):
         name = '"%s":' % self.name
 
         if isinstance(self.data, (int, float)):
-            return "%s%s" % (name, str(self.data))
+            return "%s%s" % (name, data)
 
-        if isinstance(self.data, str) or isinstance(self.data, unicode):
-            return '%s"%s"' % (name, _doublequote(self.data))
+        if isinstance(self.data, (str, unicode)):
+            return '%s"%s"' % (name, _doublequote(
+                                     unicode(self.data).encode("utf-8")))
 
         if isinstance(self.data, (tuple, list)):
-            arguments = map(lambda x: if_else(isinstance(x, str), \
-                            '"%s"' % _doublequote(str(x)), str(x)), self.data)
+            arguments = map(lambda x: if_else(isinstance(x, (str, unicode)), \
+                            '"%s"' % _doublequote(unicode(x).encode("utf-8")),
+                                                  unicode(x).encode("utf-8")),
+                                                  self.data)
+
             return "%s[%s]" % (name, ",".join(arguments))
 
         return '%s%s' % (name, NULL)
@@ -159,11 +163,16 @@ class APNSNotificationWrapper(object):
     debug_ssl = False
 
     def __init__(self, certificate=None, sandbox=True, debug_ssl=False, \
-                    force_ssl_command=False):
+                    force_ssl_command=False, connection=None):
         self.debug_ssl = debug_ssl
-        self.connection = APNSConnection(certificate=certificate, \
+
+        if not connection:
+            self.connection = APNSConnection(certificate=certificate, \
                             force_ssl_command=force_ssl_command, \
                             debug=self.debug_ssl)
+        else:
+            self.connection = connection
+
         self.sandbox = sandbox
         self.payloads = []
 
@@ -189,15 +198,34 @@ class APNSNotificationWrapper(object):
 
         self.connection.connect(apnsHost, self.apnsPort)
 
-    def discounnect(self):
+    def disconnect(self):
         """Close connection ton APNS server"""
         self.connection.close()
 
-    def notify(self):
+    def notify_raw(self, data=None, encoded_data=None):
         """
-        Send nofification to APNS:
+        Method to send data directly to opened connection. We assume that
+        `data` or `encoded_data` already have builded payloads (in
+        another place/another side) so just send it and forget
+        """
+        if data:
+            self.connection.write(data)
+            return True
+
+        if encoded_data:
+            # TODO: encode data
+            data = ""
+            self.connection.write(data)
+            return True
+
+        return False
+
+    @property
+    def prepared_message(self):
+        """
+        Prepare nofification to APNS:
             1) prepare all internal variables to APNS Payout JSON
-            2) send notification
+            2) return prepared data
         """
         payloads = [o.payload() for o in self.payloads]
         messages = []
@@ -210,7 +238,15 @@ class APNSNotificationWrapper(object):
             messages.append(struct.pack('%ds' % plen, p))
 
         message = "".join(messages)
-        self.connection.write(message)
+
+        return message
+
+    def notify(self):
+        """
+        Prepare all messages and send it to the currently opened connection
+        """
+
+        self.connection.write(self.prepared_message)
 
         return True
 
@@ -297,7 +333,7 @@ class APNSNotification(object):
         if sound == None:
             self.soundValue = None
             return self
-        self.soundValue = str(sound)
+        self.soundValue = unicode(sound).encode("utf-8")
         return self
 
     def alert(self, alert=None):
@@ -305,8 +341,7 @@ class APNSNotification(object):
         Add an alert to the Wrapper. It should be string or
         APNSAlert object instance.
         """
-        if not isinstance(alert, str) and not isinstance(alert, unicode) and \
-            not isinstance(alert, APNSAlert):
+        if not isinstance(alert, (str, unicode, APNSAlert)):
             raise APNSTypeError("Wrong type of alert argument. Argument s"\
                                 "hould be String, Unicode string or an "\
                                 "instance of APNSAlert object")
@@ -330,6 +365,9 @@ class APNSNotification(object):
         """
         self.properties = None
 
+    def _build(self):
+        return self.build()
+
     def build(self):
         """
         Build all notifications items to one string.
@@ -351,7 +389,9 @@ class APNSNotification(object):
                 alertArgument = self.alertObject.build()
                 apsKeys.append('"alert":{%s}' % alertArgument)
 
-        keys.append('"aps":{%s}' % ",".join(apsKeys))
+        # issue #10, thanks to Ami.Lutt
+        if len(apsKeys) > 0:
+            keys.append('"aps":{%s}' % ",".join(apsKeys))
 
         # prepare properties
         for property in self.properties:
